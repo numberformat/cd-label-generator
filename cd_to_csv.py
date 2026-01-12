@@ -7,7 +7,6 @@ import time
 import ctypes
 import os
 from dotenv import load_dotenv
-import win32api
 import string
 import win32file
 import win32con
@@ -159,6 +158,57 @@ def append_to_csv(row):
     df.to_csv(csv_path, index=False)
 
 
+# ---------- SEARCH HELPERS ----------
+
+def search_mb_by_artist_album(artist, album):
+    query = f'artist:"{artist}" AND release:"{album}"'
+    try:
+        result = mb.search_releases(query=query, limit=10)
+        releases = result.get("release-list", [])
+    except Exception:
+        releases = []
+
+    if not releases:
+        return None, None, None, None
+
+    r = releases[0]
+    mbid = r.get("id")
+    return (
+        r.get("artist-credit", [{}])[0].get("artist", {}).get("name", ""),
+        r.get("title", ""),
+        r.get("date", "")[:4],
+        mbid,
+    )
+
+
+def search_discogs_by_artist_album(artist, album):
+    d = discogs_client.Client("CDLabeler/1.0", user_token=DISCOGS_TOKEN)
+    try:
+        results = d.search(artist=artist, release_title=album, type="release")
+    except Exception:
+        return None, None, None, None
+
+    if results:
+        r = results[0]
+        return (
+            r.artists[0].name if r.artists else "",
+            r.title,
+            str(r.year) if r.year else "",
+            r.genres[0] if r.genres else "",
+        )
+
+    return None, None, None, None
+
+
+def prompt_for_artist_album():
+    print("Metadata not found. Please enter artist/album to search.")
+    artist = input("Artist: ").strip()
+    album = input("Album: ").strip()
+    if not artist or not album:
+        return None, None
+    return artist, album
+
+
 # ---------- MAIN LOOP ----------
 
 if __name__ == "__main__":
@@ -185,14 +235,25 @@ if __name__ == "__main__":
                         time.sleep(2)
                         artist, album, year, mbid = get_musicbrainz_metadata(drive)
 
-                    if artist is None:
-                        print(f"[{drive}] CD not found in MusicBrainz. Skipping and ejecting.")
+                    genre = ""
+
+                    if not artist:
+                        print(f"[{drive}] Not found in MusicBrainz. Ejecting and asking for artist/album...")
                         eject_cd(drive)
                         print(f"[{drive}] CD tray ejected.")
-                        last_disc_ids[drive] = current_disc_id
-                        continue
+                        user_artist, user_album = prompt_for_artist_album()
+                        if user_artist and user_album:
+                            artist, album, year, mbid = search_mb_by_artist_album(user_artist, user_album)
+                            if not artist:
+                                artist, album, year, genre = search_discogs_by_artist_album(user_artist, user_album)
 
-                    genre = get_discogs_genre(artist, album)
+                        if not artist:
+                            print(f"[{drive}] Not found in any source. Skipping.")
+                            last_disc_ids[drive] = current_disc_id
+                            continue
+
+                    if not genre:
+                        genre = get_discogs_genre(artist, album)
                     year_clean = clean_year(year)
 
                     row = {
