@@ -1,11 +1,32 @@
-import tempfile, discid, discogs_client, time, ctypes, os, string, win32file, win32con, win32print, win32ui, qrcode
+import tempfile, time, os, win32ui, qrcode
 import musicbrainzngs as mb
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageWin
-from dotenv import load_dotenv
+from drive_manager import (
+    get_optical_drives,
+    get_current_disc_id,
+    print_track_durations,
+    eject_cd,
+)
+from musicbrainz_manager import (
+    init_musicbrainz,
+    get_release_by_mbid,
+    get_musicbrainz_metadata,
+    search_mb_by_artist_album,
+)
+from discogs_manager import (
+    get_discogs_token,
+    get_discogs_genre,
+    search_discogs_by_artist_album,
+)
+from common_helper import (
+    prompt_for_mbid_with_clipboard,
+    prompt_for_artist_album,
+    clean_year,
+)
 
 # ===================== CONFIG =====================
-
+DEBUG = True
 OUT_DIR = "data/auto_labels"
 PRINTER_NAME = "DYMO LabelWriter 4XL"
 
@@ -33,54 +54,15 @@ ALBUM_FONT_SIZE  = 40
 
 Path(OUT_DIR).mkdir(parents=True, exist_ok=True)
 
-mb.set_useragent("CDLabeler", "1.0", "you@example.com")
+init_musicbrainz()
 
 FONT_BOLD  = ImageFont.truetype("arialbd.ttf", ARTIST_FONT_SIZE)
 FONT_REG   = ImageFont.truetype("arial.ttf", ALBUM_FONT_SIZE)
 FONT_TRACK = ImageFont.truetype("arial.ttf", TRACK_FONT_SIZE)
 
-
 # ===================== DISCOGS TOKEN =====================
-
-def get_discogs_token():
-    load_dotenv()
-    token = os.getenv("DISCOGS_TOKEN")
-    if token:
-        return token
-
-    print("\nDiscogs token not found.")
-    print("Create one at: https://www.discogs.com/settings/developers\n")
-    token = input("Enter your Discogs user token: ").strip()
-
-    with open(".env", "a", encoding="utf-8") as f:
-        f.write(f"\nDISCOGS_TOKEN={token}\n")
-
-    return token
-
-
 DISCOGS_TOKEN = get_discogs_token()
-
-
 # ===================== DRIVE DETECTION =====================
-
-def get_optical_drives():
-    drives = []
-    bitmask = ctypes.windll.kernel32.GetLogicalDrives()
-
-    for letter in string.ascii_uppercase:
-        if bitmask & 1:
-            drive = f"{letter}:"
-            try:
-                drive_type = win32file.GetDriveType(drive)
-                if drive_type == win32con.DRIVE_CDROM:
-                    drives.append(drive)
-            except:
-                pass
-        bitmask >>= 1
-
-    return drives
-
-
 DRIVES = get_optical_drives()
 
 if not DRIVES:
@@ -89,70 +71,7 @@ if not DRIVES:
 
 print(f"Detected optical drives: {', '.join(DRIVES)}")
 
-
 # ===================== CORE HELPERS =====================
-
-def eject_cd(drive_letter):
-    drive = drive_letter.rstrip(":")
-    cmd = f"open {drive}: type CDAudio alias drive"
-    ctypes.windll.winmm.mciSendStringW(cmd, None, 0, None)
-    ctypes.windll.winmm.mciSendStringW("set drive door open", None, 0, None)
-    ctypes.windll.winmm.mciSendStringW("close drive", None, 0, None)
-
-
-def get_current_disc_id(drive):
-    try:
-        disc = discid.read(drive)
-        return disc.id
-    except:
-        return None
-
-
-def get_musicbrainz_metadata(drive):
-    try:
-        disc = discid.read(drive)
-
-        result = mb.get_releases_by_discid(
-            disc.id,
-            includes=["artists", "recordings"]
-        )
-
-        release = result["disc"]["release-list"][0]
-
-        artist = release["artist-credit"][0]["artist"]["name"]
-        album = release["title"]
-        year = release.get("date", "")[:4]
-        mbid = release["id"]
-
-        return artist, album, year, mbid
-
-    except:
-        return None, None, None, None
-
-
-def get_discogs_genre(artist, album):
-    try:
-        d = discogs_client.Client(
-            "CDLabeler/1.0",
-            user_token=DISCOGS_TOKEN
-        )
-        results = d.search(artist=artist, release_title=album, type="release")
-        if results:
-            r = results[0]
-            if r.genres:
-                return r.genres[0]
-    except:
-        pass
-
-    return ""
-
-
-def clean_year(y):
-    try:
-        return str(int(float(y)))
-    except:
-        return ""
-
 
 def wrap_text(draw, text, font, max_width):
     words = text.split()
@@ -173,58 +92,6 @@ def wrap_text(draw, text, font, max_width):
         lines.append(current)
 
     return lines
-
-
-# ===================== SEARCH HELPERS =====================
-
-def search_mb_by_artist_album(artist, album):
-    query = f'artist:"{artist}" AND release:"{album}"'
-    try:
-        result = mb.search_releases(query=query, limit=10)
-        releases = result.get("release-list", [])
-    except Exception:
-        releases = []
-
-    if not releases:
-        return None, None, None, None
-
-    r = releases[0]
-    mbid = r.get("id")
-    return (
-        r.get("artist-credit", [{}])[0].get("artist", {}).get("name", ""),
-        r.get("title", ""),
-        r.get("date", "")[:4],
-        mbid,
-    )
-
-
-def search_discogs_by_artist_album(artist, album):
-    d = discogs_client.Client("CDLabeler/1.0", user_token=DISCOGS_TOKEN)
-    try:
-        results = d.search(artist=artist, release_title=album, type="release")
-    except Exception:
-        return None, None, None, None
-
-    if results:
-        r = results[0]
-        return (
-            r.artists[0].name if r.artists else "",
-            r.title,
-            str(r.year) if r.year else "",
-            r.genres[0] if r.genres else "",
-        )
-
-    return None, None, None, None
-
-
-def prompt_for_artist_album():
-    print("Metadata not found. Please enter artist/album to search.")
-    artist = input("Artist: ").strip()
-    album = input("Album: ").strip()
-    if not artist or not album:
-        return None, None
-    return artist, album
-
 
 # ===================== LABEL GENERATOR =====================
 
@@ -363,13 +230,24 @@ if __name__ == "__main__":
                     genre = ""
 
                     if not artist:
-                        print(f"[{drive}] Not found in MusicBrainz. Ejecting and asking for artist/album...")
+                        print(f"[{drive}] Not found in MusicBrainz.")
+                        print_track_durations(drive)
                         eject_cd(drive)
-                        user_artist, user_album = prompt_for_artist_album()
-                        if user_artist and user_album:
-                            artist, album, year, mbid = search_mb_by_artist_album(user_artist, user_album)
-                            if not artist:
-                                artist, album, year, genre = search_discogs_by_artist_album(user_artist, user_album)
+
+                        mbid_input = prompt_for_mbid_with_clipboard()
+                        if mbid_input:
+                            artist, album, year, mbid = get_release_by_mbid(mbid_input)
+
+                        if not artist:
+                            user_artist, user_album = prompt_for_artist_album()
+                            if user_artist and user_album:
+                                artist, album, year, mbid = search_mb_by_artist_album(user_artist, user_album)
+                                if not artist:
+                                    artist, album, year, genre = search_discogs_by_artist_album(
+                                        user_artist,
+                                        user_album,
+                                        token=DISCOGS_TOKEN
+                                    )
 
                         if not artist:
                             print(f"[{drive}] Not found in any source. Ejecting.")
@@ -377,7 +255,7 @@ if __name__ == "__main__":
                             continue
 
                     if not genre:
-                        genre = get_discogs_genre(artist, album)
+                        genre = get_discogs_genre(artist, album, token=DISCOGS_TOKEN)
                     year_clean = clean_year(year)
 
                     print(f"[{drive}] {artist} - {album} ({year_clean}) [{genre}]")
@@ -389,11 +267,12 @@ if __name__ == "__main__":
                     print(f"[{drive}] Label generated: {label_path}")
 
                     time.sleep(1)
-                    print_image_to_dymo(label_path)
-                    try:
-                        os.remove(label_path)
-                    except:
-                        pass                    
+                    if not DEBUG:
+                        print_image_to_dymo(label_path)
+                        try:
+                            os.remove(label_path)
+                        except:
+                            pass                    
                     print(f"[{drive}] Label printed.")
 
                     time.sleep(1)
