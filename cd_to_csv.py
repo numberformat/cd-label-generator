@@ -1,78 +1,40 @@
-import discid
-import musicbrainzngs as mb
-import discogs_client
-import pandas as pd
-from pathlib import Path
 import time
-import ctypes
-import os
-from dotenv import load_dotenv
-import win32api
-import string
-import win32file
-import win32con
+
+from file_manager import append_to_csv
+from drive_manager import (
+    get_optical_drives,
+    get_current_disc_id,
+    print_track_durations,
+    eject_cd,
+)
+from musicbrainz_manager import (
+    init_musicbrainz,
+    search_mb_by_artist_album,
+    get_musicbrainz_metadata,
+    get_release_by_mbid,
+)
+from discogs_manager import (
+    get_discogs_token,
+    get_discogs_genre,
+    search_discogs_by_artist_album,
+)
+from common_helper import (
+    prompt_for_mbid_with_clipboard,
+    prompt_for_artist_album,
+    clean_year,
+)
 
 # ---------------- CONFIG ----------------
 CSV_PATH = "data/cd_labels.csv"
-# ----------------------------------------
+# ---------------------------------------
 
-mb.set_useragent("CDLabeler", "1.0", "you@example.com")
-
+init_musicbrainz()
 
 # ---------- ENV / TOKEN HANDLING ----------
 
-def get_discogs_token():
-    load_dotenv()
-
-    token = os.getenv("DISCOGS_TOKEN")
-    if token:
-        return token
-
-    print("\nDiscogs token not found.")
-    print("You can create one at: https://www.discogs.com/settings/developers\n")
-    token = input("Enter your Discogs user token: ").strip()
-
-    # save to .env for next time
-    with open(".env", "a", encoding="utf-8") as f:
-        f.write(f"\nDISCOGS_TOKEN={token}\n")
-
-    print("Saved token to .env\n")
-    return token
-
-
 DISCOGS_TOKEN = get_discogs_token()
 
-
 # ---------- DRIVE DETECTION ----------
-
-def get_optical_drives():
-    drives = []
-
-    # Method 1: Win32 API (fast)
-    bitmask = ctypes.windll.kernel32.GetLogicalDrives()
-    for letter in string.ascii_uppercase:
-        if bitmask & 1:
-            drive = f"{letter}:"
-            try:
-                drive_type = win32file.GetDriveType(drive)
-                if drive_type == win32con.DRIVE_CDROM:
-                    drives.append(drive)
-            except:
-                pass
-        bitmask >>= 1
-
-    # Method 2: Fallback – probe discid directly
-    if not drives:
-        for letter in string.ascii_uppercase:
-            drive = f"{letter}:"
-            try:
-                discid.read(drive)
-                drives.append(drive)
-            except:
-                pass
-
-    return drives
-
 
 DRIVES = get_optical_drives()
 
@@ -81,85 +43,6 @@ if not DRIVES:
     exit(1)
 
 print(f"Detected optical drives: {', '.join(DRIVES)}")
-
-
-# ---------- CORE FUNCTIONS ----------
-
-def eject_cd(drive_letter):
-    drive = drive_letter.rstrip(":")
-    cmd = f"open {drive}: type CDAudio alias drive"
-    ctypes.windll.winmm.mciSendStringW(cmd, None, 0, None)
-    ctypes.windll.winmm.mciSendStringW("set drive door open", None, 0, None)
-    ctypes.windll.winmm.mciSendStringW("close drive", None, 0, None)
-
-
-def get_current_disc_id(drive):
-    try:
-        disc = discid.read(drive)
-        return disc.id
-    except:
-        return None
-
-
-def get_musicbrainz_metadata(drive):
-    try:
-        disc = discid.read(drive)
-
-        result = mb.get_releases_by_discid(
-            disc.id,
-            includes=["artists", "release-groups"]
-        )
-
-        release = result["disc"]["release-list"][0]
-
-        artist = release["artist-credit"][0]["artist"]["name"]
-        album = release["title"]
-        year = release.get("date", "")[:4]
-        mbid = release["id"]
-
-        return artist, album, year, mbid
-
-    except Exception:
-        return None, None, None, None
-
-
-def get_discogs_genre(artist, album):
-    d = discogs_client.Client(
-        "CDLabeler/1.0",
-        user_token=DISCOGS_TOKEN
-    )
-
-    results = d.search(artist=artist, release_title=album, type="release")
-
-    if results:
-        r = results[0]
-        if r.genres:
-            return r.genres[0]
-
-    return ""
-
-
-def clean_year(y):
-    try:
-        return str(int(float(y)))
-    except:
-        return ""
-
-
-def append_to_csv(row):
-    csv_path = Path(CSV_PATH)
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if csv_path.exists():
-        df = pd.read_csv(csv_path)
-        df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-    else:
-        df = pd.DataFrame([row])
-
-    df.to_csv(csv_path, index=False)
-
-
-# ---------- MAIN LOOP ----------
 
 if __name__ == "__main__":
     print("Waiting for CD insertion on all drives...")
@@ -173,26 +56,51 @@ if __name__ == "__main__":
                 last_disc_id = last_disc_ids[drive]
 
                 if current_disc_id and current_disc_id != last_disc_id:
-                    print(f"[{drive}] CD detected. Processing...")
-
-                    time.sleep(2)  # drive settle time
+                    print(f"\n[{drive}] CD detected. Processing...")
+                    time.sleep(2)
 
                     artist, album, year, mbid = get_musicbrainz_metadata(drive)
+                    genre = ""
 
-                    # retry once to avoid race condition
-                    if artist is None:
-                        print(f"[{drive}] Not found, retrying once...")
-                        time.sleep(2)
-                        artist, album, year, mbid = get_musicbrainz_metadata(drive)
+                    if not artist:
+                        print(f"[{drive}] Not found by disc ID.")
 
-                    if artist is None:
-                        print(f"[{drive}] CD not found in MusicBrainz. Skipping and ejecting.")
+                        # 1. Print track durations
+                        print_track_durations(drive)
+
+                        # 2. Eject tray so user can grab disc + work
                         eject_cd(drive)
                         print(f"[{drive}] CD tray ejected.")
-                        last_disc_ids[drive] = current_disc_id
-                        continue
 
-                    genre = get_discogs_genre(artist, album)
+                        # 3. Prompt for MBID (clipboard first)
+                        mbid_input = prompt_for_mbid_with_clipboard()
+                        if mbid_input:
+                            artist, album, year, mbid = get_release_by_mbid(mbid_input)
+
+                        # 4. Artist/Album fallback
+                        if not artist:
+                            user_artist, user_album = prompt_for_artist_album()
+
+                            if user_artist and user_album:
+                                artist, album, year, mbid = search_mb_by_artist_album(user_artist, user_album)
+
+                                if not artist:
+                                    artist, album, year, genre = search_discogs_by_artist_album(
+                                        user_artist,
+                                        user_album,
+                                        token=DISCOGS_TOKEN
+                                    )
+
+                        if not artist:
+                            print(f"[{drive}] No match found. Skipping.")
+                            last_disc_ids[drive] = current_disc_id
+                            continue
+
+
+
+                    if not genre:
+                        genre = get_discogs_genre(artist, album, token=DISCOGS_TOKEN)
+
                     year_clean = clean_year(year)
 
                     row = {
@@ -204,10 +112,10 @@ if __name__ == "__main__":
                         "mbid": mbid
                     }
 
-                    print(f"[{drive}] Detected:")
+                    print(f"[{drive}] Identified:")
                     print(row)
 
-                    append_to_csv(row)
+                    append_to_csv(row, CSV_PATH)
                     print(f"[{drive}] Saved to {CSV_PATH}")
 
                     eject_cd(drive)
