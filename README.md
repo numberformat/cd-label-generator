@@ -297,3 +297,7 @@ This is not a toy script.
 It is a full ingestion + rendering pipeline designed for real batch workflows.
 
 Insert discs. Get back labels.
+
+## TODO
+
+test this. Generate labels large and cd_to_label can be further combined.
