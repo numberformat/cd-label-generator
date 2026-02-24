@@ -5,6 +5,8 @@ import random
 import urllib.error
 import re
 
+MAX_RETRY_COUNT=3
+
 def init_musicbrainz(app_name="CDLabeler", version="1.0", contact="you@example.com"):
     mb.set_useragent(app_name, version, contact)
 
@@ -22,7 +24,7 @@ def extract_mbid_from_text(text):
     return None
 
 
-def mb_with_retry(func, *args, retries=5, base_delay=1.0, **kwargs):
+def mb_with_retry(func, *args, retries=MAX_RETRY_COUNT, base_delay=1.0, **kwargs):
     response_error = getattr(mb, "ResponseError", None)
     attempt = 0
     while True:

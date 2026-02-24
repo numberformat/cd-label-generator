@@ -4,28 +4,24 @@ import musicbrainzngs as mb
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
 
-# 4x6 landscape (confirmed working with the LabelWriter 4XL)
-LABEL_WIDTH = 1800
-LABEL_HEIGHT = 1200
-
-SAFE_LEFT = 40
-SAFE_RIGHT = 500
-SAFE_TOP = 40
-SAFE_BOTTOM = 80
+from label_config import (
+    LABEL_WIDTH,
+    LABEL_HEIGHT,
+    SAFE_LEFT,
+    SAFE_RIGHT,
+    SAFE_TOP,
+    SAFE_BOTTOM,
+    QR_SIZE,
+    LINE_SPACING,
+    TITLE_FONT_SIZE,
+    TRACK_FONT_SIZE,
+)
 
 HEADER_Y = SAFE_TOP + 0
 SUBHEADER_Y = SAFE_TOP + 60
 TRACKS_Y = SAFE_TOP + 130
 
-QR_SIZE = 250
-
-LINE_SPACING = 46
-TRACK_FONT_SIZE = 36
-ARTIST_FONT_SIZE = 50
-ALBUM_FONT_SIZE = 40
-
-FONT_BOLD = ImageFont.truetype("arialbd.ttf", ARTIST_FONT_SIZE)
-FONT_REG = ImageFont.truetype("arial.ttf", ALBUM_FONT_SIZE)
+FONT_TITLE = ImageFont.truetype("arialbd.ttf", TITLE_FONT_SIZE)
 FONT_TRACK = ImageFont.truetype("arial.ttf", TRACK_FONT_SIZE)
 
 
@@ -59,8 +55,8 @@ def generate_label_image(artist, album, year, genre, mbid):
     draw = ImageDraw.Draw(img)
 
     # HEADER
-    draw.text((SAFE_LEFT, HEADER_Y), artist, fill="black", font=FONT_BOLD)
-    draw.text((SAFE_LEFT, SUBHEADER_Y), album, fill="black", font=FONT_REG)
+    draw.text((SAFE_LEFT, HEADER_Y), artist, fill="black", font=FONT_TITLE)
+    draw.text((SAFE_LEFT, SUBHEADER_Y), album, fill="black", font=FONT_TRACK)
 
     # YEAR / GENRE (RIGHT)
     right_x = LABEL_WIDTH - SAFE_RIGHT
@@ -69,20 +65,20 @@ def generate_label_image(artist, album, year, genre, mbid):
     genre_w = 0
 
     if year:
-        bbox = draw.textbbox((0, 0), year, font=FONT_BOLD)
+        bbox = draw.textbbox((0, 0), year, font=FONT_TITLE)
         year_w = bbox[2] - bbox[0]
 
     if genre:
-        bbox = draw.textbbox((0, 0), genre, font=FONT_REG)
+        bbox = draw.textbbox((0, 0), genre, font=FONT_TRACK)
         genre_w = bbox[2] - bbox[0]
 
     col_w = max(year_w, genre_w)
 
     if year:
-        draw.text((right_x - col_w, HEADER_Y), year, fill="black", font=FONT_BOLD)
+        draw.text((right_x - col_w, HEADER_Y), year, fill="black", font=FONT_TITLE)
 
     if genre:
-        draw.text((right_x - col_w, SUBHEADER_Y), genre, fill="black", font=FONT_REG)
+        draw.text((right_x - col_w, SUBHEADER_Y), genre, fill="black", font=FONT_TRACK)
 
     # TRACK LIST (from MusicBrainz)
     tracks = []
@@ -123,7 +119,7 @@ def generate_label_image(artist, album, year, genre, mbid):
             break
 
     if truncated:
-        draw.text((SAFE_LEFT, y), "ƒ?İ", fill="black", font=FONT_TRACK)
+        draw.text((SAFE_LEFT, y), "...", fill="black", font=FONT_TRACK)
 
     # ---------------------------
     # QR CODE (BOTTOM RIGHT)
