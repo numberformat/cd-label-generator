@@ -37,6 +37,13 @@ This is a **Windows-focused** project, tested with external USB optical drives.
   * Full track list (auto wrapped)
   * **Automatic truncation + ellipsis when tracks overflow**
   * QR code linking to MusicBrainz release
+* Generates **movie labels** including:
+
+  * Title with right-aligned year and runtime
+  * MPAA-style certification (e.g., G, PG, PG-13, R)
+  * TMDb user rating as a percentage
+  * Budget when available
+  * Synopsis with cast list appended and truncated to fit
 * Automatically ejects discs after processing
 * No hardcoded credentials
 
@@ -57,6 +64,9 @@ This is a **Windows-focused** project, tested with external USB optical drives.
 cd-label-generator/
 ├── cd_to_csv.py                 # CD detection + metadata ingestion
 ├── generate_labels_large.py     # Label rendering
+├── movie_to_label.py            # Movie label rendering (TMDb)
+├── movie_label_image_manager.py # Movie label layout
+├── label_config.py              # Shared label layout constants
 ├── data/
 │   ├── cd_labels.csv            # Metadata store
 │   └── gif_labels_large/        # Output images
@@ -137,12 +147,18 @@ You can create one at: https://www.discogs.com/settings/developers
 Enter your Discogs user token:
 ```
 
-### How to get a token:
+### How to get a discogs token:
 
 1. Go to: [https://www.discogs.com/settings/developers](https://www.discogs.com/settings/developers)
 2. Click **Generate new token**
 3. Copy the token
 4. Paste it into the prompt
+
+### How to get a TMDB token:
+
+1. Go to https://www.themoviedb.org/ for a free account to get a API key.
+2. Check your profile. It will be listed under API.
+3. The TMDb API key is stored as `TMDB_API_KEY` in `.env`. 
 
 The script will automatically create/update:
 
@@ -251,6 +267,11 @@ Import these images into your label software.
 * QR code placed bottom-right
 * No margins (printer software handles margins)
 
+Movie label layout details:
+* Title left, year right, runtime right below year
+* Rating line under title includes certification, TMDb user rating percentage, and budget
+* Synopsis is followed by a cast line; both are wrapped and truncated to fit
+
 ---
 
 ## **Important Behavior Notes**
@@ -263,6 +284,8 @@ Import these images into your label software.
 * **Genre may be blank**
 * **QR codes are URLs (not base64 blobs) for scanner compatibility**
 * **No manual config files required**
+* **Movie ratings come from TMDb certifications (e.g., PG-13), not vote averages**
+* **TMDb vote averages are displayed as percentages (vote_average * 10)**
 
 ---
 
