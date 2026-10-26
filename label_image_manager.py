@@ -123,7 +123,7 @@ def generate_label_image(artist, album, year, genre, mbid):
             break
 
     if truncated:
-        draw.text((SAFE_LEFT, y), "ƒ?İ", fill="black", font=FONT_TRACK)
+        draw.text((SAFE_LEFT, y), "...", fill="black", font=FONT_TRACK)
 
     # ---------------------------
     # QR CODE (BOTTOM RIGHT)
