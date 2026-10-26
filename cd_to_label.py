@@ -26,7 +26,7 @@ from common_helper import (
 )
 
 # ===================== CONFIG =====================
-DEBUG = True
+DEBUG = False
 OUT_DIR = "data/auto_labels"
 PRINTER_NAME = "DYMO LabelWriter 4XL"
 
